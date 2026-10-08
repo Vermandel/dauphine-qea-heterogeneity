@@ -3,6 +3,8 @@
 Ages 20–99, flexible prices, retirement at 65, one asset, endogenous capital, wage and interest rate.
 Put **Dynare 7.x (at least 7.1; 7.2 recommended)** on the MATLAB path, then run from this directory.
 
+Download the six code files listed below into one empty folder (no sub-folders needed), then run from that folder. The folders `results/` and `../figures/` are created automatically.
+
 ## Files
 
 Each model is a single `.mod` file read from top to bottom: calibration, model, steady state, shock,
