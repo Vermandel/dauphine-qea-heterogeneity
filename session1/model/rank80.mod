@@ -7,40 +7,68 @@
 @#ifndef SHOCK_TYPE
   @#define SHOCK_TYPE = 1 // 1: TFP; 2: depreciation (financial crisis)
 @#endif
-var Z dep y w r k C;
-varexo epsZ epsD;
-parameters beta sigma alpha delta rhoZ rhoD Lbar betaRA
+var
+	Z		// Aggregate productivity.
+	dep		// Time-varying depreciation rate.
+	y		// Aggregate output.
+	w		// Wage per efficiency unit.
+	r		// Net capital return.
+	k		// End-of-period capital stock.
+	C		// Aggregate consumption.
+;
+varexo
+	epsZ		// Aggregate productivity innovation.
+	epsD		// Depreciation-rate innovation.
+;
+parameters
+	beta		// Annual household discount factor in the OLG calibration.
+	sigma		// Relative risk aversion (inverse intertemporal elasticity).
+	alpha		// Capital share of output.
+	delta		// Baseline annual depreciation rate.
+	rhoZ		// Persistence of productivity.
+	rhoD		// Persistence of depreciation.
+	Lbar		// Aggregate efficient labor supplied.
+	betaRA		// RA discount factor chosen to match the OLG return.
 @#for j in 1:J
-    z_@{j} N_@{j}
+	z_@{j}		// Labor efficiency of age group @{j}.
+	N_@{j}		// Population share of age group @{j}.
 @#endfor
 ;
 // Calibration (identical in olg80.mod and rank80.mod; olg80_bc.mod adds a transfer process).
-beta  = 0.97;
-sigma = 2.00;
-alpha = 0.33;
-delta = 0.06;
-rhoZ  = 0.90;
-rhoD  = 0.90;
+beta  = 0.97;	// OLG annual discount factor.
+sigma = 2.00;	// Relative risk aversion (inverse intertemporal elasticity).
+alpha = 0.33;	// Capital share in production.
+delta = 0.06;	// Baseline annual depreciation rate.
+rhoZ  = 0.90;	// Persistence of productivity shocks.
+rhoD  = 0.90;	// Persistence of depreciation shocks.
 
-// Exogenous efficiency profile: hump-shaped earnings until age 64,
-// retirement thereafter. Cohort masses are equal in this first version.
+// Cohort j is age j+19. Working efficiency is a base of 0.35 plus a smooth
+// age-50 bonus of up to 0.85; 14 years controls its spread. From age 65,
+// retirement sets efficiency to zero. Cohort masses are equal.
 @#for j in 1:J
-    N_@{j} = 1/@{J};
-    @#if j <= 45
-        z_@{j} = 0.35 + 0.85*exp(-0.5*((@{j+19}-50)/14)^2);
-    @#else
-        z_@{j} = 0;
-    @#endif
+	N_@{j} = 1/@{J};	// Equal population mass at each age.
+	@#if j <= 45
+		z_@{j} = 0.35 + 0.85*exp(-0.5*((@{j+19}-50)/14)^2);	// Base plus age-50 bonus.
+	@#else
+		z_@{j} = 0;	// No labor supply after retirement.
+	@#endif
 @#endfor
 
+// Add each age group's efficiency weighted by its population share.
+// The sum is the total labor input used in production.
 Lbar = 0
 @#for j in 1:J
-    + N_@{j}*z_@{j}
+	+ N_@{j}*z_@{j}
 @#endfor
-;
-olg_ = load(fullfile('results','results_tfp.mat'),'oo_','M_');
-rOLG = olg_.oo_.steady_state(strcmp(cellstr(olg_.M_.endo_names),'r'));
-set_param_value('betaRA',1/(1+rOLG));
+;	// Aggregate efficient labor.
+// Match the representative household's discount factor to the saved OLG return.
+@#if SHOCK_TYPE == 1
+olg_ = load('results_tfp.mat','oo_','M_');	// OLG economy after the productivity shock.
+@#else
+olg_ = load('results_dep.mat','oo_','M_');	// OLG economy after the depreciation shock.
+@#endif
+rOLG = olg_.oo_.steady_state(strcmp(cellstr(olg_.M_.endo_names),'r'));	// OLG interest rate.
+set_param_value('betaRA',1/(1+rOLG));	// Same stationary return in the RA economy.
 
 model;
     [name='TFP law of motion']
@@ -74,83 +102,72 @@ check;
 
 @#if SHOCK_TYPE == 1
     shocks;
-        var epsZ;
-        periods 1;
-        values -0.01;
+		var epsZ;	// Shock to productivity.
+		periods 1;	// First simulated period.
+		values -0.01;	// Log productivity falls by about 1%.
     end;
 @#else
     shocks;
-        var epsD;
-        periods 1;
-        values 0.02;
+		var epsD;	// Shock to depreciation.
+		periods 1;	// First simulated period.
+		values 0.02;	// Depreciation rises by 2 percentage points.
     end;
 @#endif
 perfect_foresight_setup(periods=100);
-perfect_foresight_solver(maxit=200, tolf=1e-9);
+perfect_foresight_solver(maxit=200, tolf=1e-8);
+// Prepare the same 100-period shock path as OLG, then solve all RA choices
+// and market prices along it under perfect foresight.
 assert(oo_.deterministic_simulation.status == 1, 'RANK perfect-foresight solution failed');
 @#if SHOCK_TYPE == 1
-    save('results/results_rank_tfp.mat','M_','oo_','options_');
+    save('results_rank_tfp.mat','M_','oo_','options_');
 @#else
-    save('results/results_rank_dep.mat','M_','oo_','options_');
+    save('results_rank_dep.mat','M_','oo_','options_');
 @#endif
 
 // ---------------------------------------------------------------------
-// Transition figure: OLG (saved by olg80.mod) against RANK, same shock.
+// Transition figure (subplots): OLG (saved by olg80.mod) against RANK, same shock.
 // ---------------------------------------------------------------------
 verbatim;
-figdir = fullfile('..','figures'); if ~isfolder(figdir), mkdir(figdir); end
+% Compare the saved OLG transition with the current RA path.
 @#if SHOCK_TYPE == 1
-    O = load(fullfile('results','results_tfp.mat')); figname = 'olg80_tfp_transition.pdf';
+	O = load('results_tfp.mat');
 @#else
-    O = load(fullfile('results','results_dep.mat')); figname = 'olg80_depreciation.pdf';
+	O = load('results_dep.mat');
 @#endif
-oo = O.oo_; J = @{J}; age = (20:19+J)';
-on = cellstr(O.M_.endo_names); rn = cellstr(M_.endo_names);
-io = @(n) find(strcmp(on,n),1); ir = @(n) find(strcmp(rn,n),1);
+oo = O.oo_;		% OLG simulated transition.
+on = cellstr(O.M_.endo_names);	% OLG variable names.
+rn = cellstr(M_.endo_names);	% RA variable names.
+io = @(n) find(strcmp(on,n),1);	% Position of an OLG variable.
+ir = @(n) find(strcmp(rn,n),1);	% Position of an RA variable.
+t  = 0:size(oo.endo_simul,2)-1;	% Simulation periods.
+
+% Percentage deviation from steady state (percentage points for r)
 pdev = @(o,i) 100*(o.endo_simul(i,:)/o.steady_state(i)-1);
 ppt  = @(o,i) 100*(o.endo_simul(i,:)-o.steady_state(i));
-t = 0:size(oo.endo_simul,2)-1;
-grey = [0.45 0.45 0.45 0.22]; blue = [0 0.30 0.60]; red = [0.80 0.15 0.10];
 
-figure('Color','w','Position',[100 100 1000 600]);
-@#if SHOCK_TYPE == 1
-tl = tiledlayout(2,3,'TileSpacing','compact','Padding','compact');
-nexttile([2 1]);
-@#else
-tl = tiledlayout(2,2,'TileSpacing','compact','Padding','compact');
-nexttile;
-@#endif
-hold('on');
-for j = 1:J, plot(t,pdev(oo,io(sprintf('c_%d',j))),'Color',grey,'LineWidth',0.8); end
-h1 = plot(t,pdev(oo,io('C')),'Color',blue,'LineWidth',2.5);
-h2 = plot(t,pdev(oo_,ir('C')),'--','Color',red,'LineWidth',2);
-h0 = plot(nan,nan,'Color',grey(1:3),'LineWidth',0.8);
-title('Consumption'); ylabel('% deviation'); grid('on'); xlim([0 40]);
-legend([h0 h1 h2],{'OLG by age','OLG aggregate','RANK'},'Location','southeast');
-@#if SHOCK_TYPE == 1
-ylim([-0.8 0.3]);
-vars = {'y','k','r','w'}; ttl = {'Output','Capital','Net interest rate','Wage'};
+vars = {'C','y','k','r'};
+ttl  = {'Consumption','Output','Capital','Net interest rate'};
+
+figure('Name','OLG vs RANK');
 for q = 1:4
-    nexttile; hold('on');
-    if q == 3, f = ppt; yl = 'percentage points'; else, f = pdev; yl = '% deviation'; end
-    plot(t,f(oo,io(vars{q})),'Color',blue,'LineWidth',2.5);
-    plot(t,f(oo_,ir(vars{q})),'--','Color',red,'LineWidth',2);
-    title(ttl{q}); ylabel(yl); grid('on'); xlim([0 40]);
-    if q == 1, legend('OLG','RANK','Location','southeast'); end
+	subplot(2,2,q);
+	hold on;
+	if q == 4
+		f = ppt;
+		unit = 'Percentage points';
+	else
+		f = pdev;
+		unit = '% from steady state';
+	end
+	plot(t,f(oo,io(vars{q})),'LineWidth',2);
+	plot(t,f(oo_,ir(vars{q})),'--','LineWidth',2);
+	ylabel(unit);
+	title(ttl{q});
+	xlabel('Years');
+	grid on;
+	xlim([0 40]);
+	if q == 1
+		legend('OLG','RANK','Location','southeast');
+	end
 end
-@#else
-nexttile; hold('on');
-plot(t,pdev(oo,io('k')),'Color',blue,'LineWidth',2.5); plot(t,pdev(oo_,ir('k')),'--','Color',red,'LineWidth',2);
-title('Capital'); ylabel('% deviation'); grid('on'); xlim([0 40]); legend('OLG','RANK','Location','southeast');
-nexttile; hold('on');
-plot(t,ppt(oo,io('r')),'Color',blue,'LineWidth',2.5); plot(t,ppt(oo_,ir('r')),'--','Color',red,'LineWidth',2);
-title('Net interest rate'); ylabel('percentage points'); grid('on'); xlim([0 40]);
-nexttile; hold('on');
-imp = arrayfun(@(j) 100*(oo.endo_simul(io(sprintf('c_%d',j)),2)/oo.steady_state(io(sprintf('c_%d',j)))-1),1:J);
-bar(age,imp,1,'FaceColor',blue,'EdgeColor','none'); grid('on');
-rc = pdev(oo_,ir('C')); yline(rc(2),'--','Color',red,'LineWidth',2);
-xline(64.5,':','retirement'); xlabel('Age'); ylabel('% deviation on impact'); title('Consumption on impact, by age');
-@#endif
-xlabel(tl,'Years (unexpected shock at date 1)');
-exportgraphics(gcf,fullfile(figdir,figname),'ContentType','vector');
 end;
